@@ -700,10 +700,11 @@ static __device__ __forceinline__ int ggml_cuda_dp4a(const int a, const int b, i
     int a0 = (a<<24)>>24, a1 = (a<<16)>>24, a2 = (a<<8)>>24, a3 = a>>24;
     int b0 = (b<<24)>>24, b1 = (b<<16)>>24, b2 = (b<<8)>>24, b3 = b>>24;
     int t0, t1, t2, t3;
-    asm("mul.lo.s32 %0, %2, %3;" : "=&r"(t0) : "r"(a0), "r"(b0));
-    asm("mul.lo.s32 %0, %2, %3;" : "=&r"(t1) : "r"(a1), "r"(b1));
-    asm("mul.lo.s32 %0, %2, %3;" : "=&r"(t2) : "r"(a2), "r"(b2));
-    asm("mul.lo.s32 %0, %2, %3;" : "=&r"(t3) : "r"(a3), "r"(b3));
+    // %0 = t0, %1 = a0, %2 = b0 (1 output + 2 inputs per block)
+    asm("mul.lo.s32 %0, %1, %2;" : "=&r"(t0) : "r"(a0), "r"(b0));
+    asm("mul.lo.s32 %0, %1, %2;" : "=&r"(t1) : "r"(a1), "r"(b1));
+    asm("mul.lo.s32 %0, %1, %2;" : "=&r"(t2) : "r"(a2), "r"(b2));
+    asm("mul.lo.s32 %0, %1, %2;" : "=&r"(t3) : "r"(a3), "r"(b3));
     return c + t0 + t1 + t2 + t3;
 #elif defined(GGML_CUDA_CMP_DP4A_FIX)
     // v1: Replace dp4a with C-level shift+multiply+add (compiles to IMAD, ~50%)
