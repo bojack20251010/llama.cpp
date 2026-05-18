@@ -142,6 +142,12 @@ if (CUDAToolkit_FOUND)
         add_compile_definitions(GGML_CUDA_FORCE_CUBLAS)
     endif()
 
+    if (GGML_CUDA_CMP_DP4A_FIX_PTX)
+        add_compile_definitions(GGML_CUDA_CMP_DP4A_FIX_PTX)
+    elseif (GGML_CUDA_CMP_DP4A_FIX)
+        add_compile_definitions(GGML_CUDA_CMP_DP4A_FIX)
+    endif()
+
     if (GGML_CUDA_NO_VMM)
         add_compile_definitions(GGML_CUDA_NO_VMM)
     endif()

@@ -694,7 +694,25 @@ static __device__ __forceinline__ int ggml_cuda_dp4a(const int a, const int b, i
 
 #else // defined(GGML_USE_HIP)
 
-#if __CUDA_ARCH__ >= GGML_CUDA_CC_DP4A || defined(GGML_USE_MUSA)
+#if defined(GGML_CUDA_CMP_DP4A_FIX_PTX)
+    // v2: Force IMUL+IADD via PTX (bypass IMLA pipeline, ~99%)
+    //    4 independent MUL + final ADD for maximum ILP
+    int a0 = (a<<24)>>24, a1 = (a<<16)>>24, a2 = (a<<8)>>24, a3 = a>>24;
+    int b0 = (b<<24)>>24, b1 = (b<<16)>>24, b2 = (b<<8)>>24, b3 = b>>24;
+    int t0, t1, t2, t3;
+    asm("mul.lo.s32 %0, %2, %3;" : "=r"(t0) : "r"(a0), "r"(b0));
+    asm("mul.lo.s32 %0, %2, %3;" : "=r"(t1) : "r"(a1), "r"(b1));
+    asm("mul.lo.s32 %0, %2, %3;" : "=r"(t2) : "r"(a2), "r"(b2));
+    asm("mul.lo.s32 %0, %2, %3;" : "=r"(t3) : "r"(a3), "r"(b3));
+    return c + t0 + t1 + t2 + t3;
+#elif defined(GGML_CUDA_CMP_DP4A_FIX)
+    // v1: Replace dp4a with C-level shift+multiply+add (compiles to IMAD, ~50%)
+    c += ((a<<24)>>24) * ((b<<24)>>24);
+    c += ((a<<16)>>24) * ((b<<16)>>24);
+    c += ((a<<8)>>24)  * ((b<<8)>>24);
+    c += (a>>24)       * (b>>24);
+    return c;
+#elif __CUDA_ARCH__ >= GGML_CUDA_CC_DP4A || defined(GGML_USE_MUSA)
     return __dp4a(a, b, c);
 #else // __CUDA_ARCH__ >= GGML_CUDA_CC_DP4A || defined(GGML_USE_MUSA)
     const int8_t * a8 = (const int8_t *) &a;
