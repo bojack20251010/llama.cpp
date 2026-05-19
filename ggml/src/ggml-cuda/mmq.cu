@@ -305,6 +305,10 @@ bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t
     }
 
     if (turing_mma_available(cc)) {
+        if (ne11 >= 64) {
+            fprintf(stderr, "[MMQ] turing_mma TRUE  ne11=%lld type=%s → USE MMQ\n",
+                    (long long)ne11, ggml_type_name(type));
+        }
         return true;
     }
 
@@ -317,7 +321,12 @@ bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t
 #endif //GGML_CUDA_FORCE_MMQ
 
     if (GGML_CUDA_CC_IS_NVIDIA(cc)) {
-        return !fp16_mma_hardware_available(cc) || ne11 < MMQ_DP4A_MAX_BATCH_SIZE;
+        bool result = !fp16_mma_hardware_available(cc) || ne11 < MMQ_DP4A_MAX_BATCH_SIZE;
+        if (ne11 >= 64 && !result) {
+            fprintf(stderr, "[MMQ] nvidia fallback FALSE ne11=%lld type=%s → cuBLAS\n",
+                    (long long)ne11, ggml_type_name(type));
+        }
+        return result;
     }
 
     if (amd_mfma_available(cc)) {

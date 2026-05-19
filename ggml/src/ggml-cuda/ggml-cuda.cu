@@ -2601,8 +2601,10 @@ static void ggml_cuda_mul_mat(ggml_backend_cuda_context & ctx, const ggml_tensor
     } else if (!split && use_mul_mat_f) {
         ggml_cuda_mul_mat_f(ctx, src0, src1, nullptr, dst);
     } else if (!split && use_mul_mat_vec_q) {
+        fprintf(stderr, "[DISPATCH] mul_mat_vec_q ne11=%lld type=%s\n", (long long)src1->ne[1], ggml_type_name(src0->type));
         ggml_cuda_mul_mat_vec_q(ctx, src0, src1, nullptr, dst);
     } else if (!split && use_mul_mat_q) {
+        fprintf(stderr, "[DISPATCH] mul_mat_q     ne11=%lld type=%s\n", (long long)src1->ne[1], ggml_type_name(src0->type));
         ggml_cuda_mul_mat_q(ctx, src0, src1, nullptr, dst);
     } else if (!split && (use_batched_cublas_f16 || use_batched_cublas_bf16 || use_batched_cublas_f32)
         && !ggml_is_transposed(src0) && !ggml_is_transposed(src1) && src1->ne[2]*src1->ne[3] > 1) {
