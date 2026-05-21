@@ -204,6 +204,8 @@ set   (GGML_CUDA_PEER_MAX_BATCH_SIZE "128" CACHE STRING
                                             "ggml: max. batch size for using peer access")
 set   (GGML_CUDA_VEC_MAX_BATCH_SIZE    "8"   CACHE STRING
                                             "ggml: max batch size for vec kernels (MMVQ/MMVF), above this uses MMQ/cuBLAS")
+option(GGML_CUDA_CMP_DP4A_FIX_PTX           "ggml: replace __dp4a with PTX mul.lo for ILP"    OFF)
+option(GGML_CUDA_CMP_DP4A_FIX               "ggml: replace __dp4a with C mul+add (IMAD)"      OFF)
 option(GGML_CUDA_NO_PEER_COPY               "ggml: do not use peer to peer copies"            OFF)
 option(GGML_CUDA_NO_VMM                     "ggml: do not try to use CUDA VMM"                OFF)
 option(GGML_CUDA_FA                         "ggml: compile ggml FlashAttention CUDA kernels"  ON)
