@@ -1,6 +1,10 @@
 #include "common.cuh"
 
-#define MMVQ_MAX_BATCH_SIZE 8 // Max. batch size for which to use MMVQ kernels.
+#ifdef GGML_CUDA_VEC_MAX_BATCH_SIZE
+#define MMVQ_MAX_BATCH_SIZE GGML_CUDA_VEC_MAX_BATCH_SIZE
+#else
+#define MMVQ_MAX_BATCH_SIZE 8
+#endif
 
 // Returns the maximum batch size for which MMVQ should be used for MUL_MAT_ID,
 // based on the quantization type and GPU architecture (compute capability).
