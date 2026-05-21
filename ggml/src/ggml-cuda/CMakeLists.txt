@@ -130,6 +130,7 @@ if (CUDAToolkit_FOUND)
 
     add_compile_definitions(GGML_CUDA_PEER_MAX_BATCH_SIZE=${GGML_CUDA_PEER_MAX_BATCH_SIZE})
     add_compile_definitions(GGML_CUDA_VEC_MAX_BATCH_SIZE=${GGML_CUDA_VEC_MAX_BATCH_SIZE})
+    add_compile_definitions(GGML_CUDA_MMQ_DP4A_MAX_BATCH=${GGML_CUDA_MMQ_DP4A_MAX_BATCH})
 
     if (GGML_CUDA_GRAPHS)
         add_compile_definitions(GGML_CUDA_USE_GRAPHS)
