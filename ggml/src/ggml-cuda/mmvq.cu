@@ -2,6 +2,10 @@
 #include "quantize.cuh"
 #include "unary.cuh"
 #include "vecdotq.cuh"
+#ifdef TURING_MMA_AVAILABLE
+#include "mma.cuh"
+using namespace ggml_cuda_mma;
+#endif
 
 #include <cstdint>
 
@@ -483,6 +487,97 @@ static __global__ void mul_mat_vec_q(
     const block_q8_1 * y = ((const block_q8_1 *) vy) + sample_y*stride_sample_y + channel_y*stride_channel_y;
     const int kbx_offset = sample_x*stride_sample_x + channel_x*stride_channel_x + row0*stride_row_x;
 
+#ifdef TURING_MMA_AVAILABLE
+    if constexpr (type == GGML_TYPE_Q4_K) {
+        // INT8 MMA path: warp collaboration replaces per-thread dp4a
+        // smem: [0..191] per warp = MMA tile (128 ints A + 64 ints B)
+        __shared__ int mma_smem[192 * nwarps];
+        int * tile_A = mma_smem + threadIdx.y * 192;
+        int * tile_B = tile_A + 128;
+
+        constexpr int stride_A = 8; // 8 ints per row = 32 int8 values
+
+        for (int kbx = threadIdx.y; kbx < blocks_per_row_x; kbx += nwarps) {
+            const int kby = kbx * (qk/QK8_1);
+
+#pragma unroll
+            for (int j = 0; j < ncols_dst; ++j) {
+#pragma unroll
+                for (int i = 0; i < rows_per_cuda_block; ++i) {
+                    const block_q4_K * bq4 = (const block_q4_K *) vx + kbx_offset + i*stride_row_x + kbx;
+                    const uint8_t * qs = (const uint8_t *) bq4->qs;
+                    const half2 dm = bq4->dm;
+                    const int * scales_raw = (const int *) bq4->scales;
+
+                    // Unpack sub-block scales
+                    uint8_t sb_sc[8], sb_mn[8];
+#pragma unroll
+                    for (int k = 0; k < 4; k++) {
+                        uint32_t s = (uint32_t)unpack_scales_q45_K(scales_raw, k);
+                        sb_sc[k*2] = (uint8_t)s; sb_sc[k*2+1] = (uint8_t)(s>>8);
+                        uint32_t m = (uint32_t)unpack_scales_q45_K(scales_raw, k+4);
+                        sb_mn[k*2] = (uint8_t)m; sb_mn[k*2+1] = (uint8_t)(m>>8);
+                    }
+                    float2 dmf = __half22float2(dm);
+
+                    float acc = 0.0f;
+
+#pragma unroll
+                    for (int s = 0; s < 8; s++) {
+                        // Load weight sub-block s (32 values) into tile_A
+                        // 8 threads load 4 bytes each → fill row 0
+                        if (threadIdx.x < 8) {
+                            int bi = s * 16 + threadIdx.x * 2;
+                            uint8_t b0 = qs[bi], b1 = qs[bi+1];
+                            int v = ((int)(b0&0xF)) | (((int)(b0>>4))<<8)
+                                  | (((int)(b1&0xF))<<16) | (((int)(b1>>4))<<24);
+                            tile_A[threadIdx.x] = v;
+                        }
+                        __syncthreads();
+                        // Replicate row 0 to rows 1..15
+                        if (threadIdx.x < 8) {
+                            int v = tile_A[threadIdx.x];
+                            for (int r = 1; r < 16; r++) tile_A[r*stride_A + threadIdx.x] = v;
+                        }
+                        __syncthreads();
+
+                        // Load activation sub-block s into tile_B
+                        const block_q8_1 * bq8 = &y[j*stride_col_y + kby + s];
+                        int sum_a = 0;
+                        if (threadIdx.x < 8) {
+                            const int * q8 = (const int *)bq8->qs;
+                            for (int r = 0; r < 8; r++) tile_B[r*8 + threadIdx.x] = q8[threadIdx.x];
+                            // Thread's share of activation sum for min correction
+                            sum_a = ggml_cuda_dp4a(0x01010101, q8[threadIdx.x], 0);
+                        }
+                        __syncthreads();
+
+                        // MMA
+                        tile<16,8,int> A;
+                        tile< 8,8,int> B;
+                        tile<16,8,int> C;
+                        load_ldmatrix(A, tile_A, stride_A);
+                        load_ldmatrix(B, tile_B, 8);
+                        C.x[0]=C.x[1]=C.x[2]=C.x[3]=0;
+                        mma(C, A, B);
+
+                        float d = __low2float(bq8->ds);
+                        float ws = (float)sb_sc[s], wm = (float)sb_mn[s];
+#pragma unroll
+                        for (int l = 0; l < 4; l++) acc += dmf.x*ws*d*(float)C.x[l];
+                        // Min correction: -dm.y * m[s] * d * Σ(a_q), per-thread fragment
+                        acc -= dmf.y*wm*d*(float)sum_a;
+                    }
+                    __syncthreads();
+                    acc = warp_reduce_sum(acc);
+                    if (threadIdx.x == 0) tmp[j][i] += acc;
+                    __syncthreads();
+                }
+            }
+        }
+    } else // fallthrough to existing dp4a path
+#endif
+    {
     for (int kbx = tid / (qi/vdr); kbx < blocks_per_row_x; kbx += blocks_per_iter) {
         const int kby = kbx * (qk/QK8_1); // y block index that aligns with kbx
 
@@ -503,6 +598,7 @@ static __global__ void mul_mat_vec_q(
                 }
             }
         }
+    }
     }
 
     __shared__ float tmp_shared[nwarps-1 > 0 ? nwarps-1 : 1][ncols_dst][rows_per_cuda_block][warp_size];

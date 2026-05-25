@@ -967,6 +967,27 @@ namespace ggml_cuda_mma {
 #endif // TURING_MMA_AVAILABLE
     }
 
+    static __device__ __forceinline__ void mma_int4(
+            tile<16, 8, int> & D, const tile<16, 4, int> & A, const tile<8, 4, int> & B) {
+#ifdef INT4_MMA_AVAILABLE
+#if __CUDA_ARCH__ >= GGML_CUDA_CC_AMPERE
+        asm("mma.sync.aligned.m16n8k32.row.col.s32.s4.s4.s32 {%0, %1, %2, %3}, {%4, %5}, {%6}, {%0, %1, %2, %3};"
+            : "+r"(D.x[0]), "+r"(D.x[1]), "+r"(D.x[2]), "+r"(D.x[3])
+            : "r"(A.x[0]), "r"(A.x[1]), "r"(B.x[0]));
+#else
+        asm("mma.sync.aligned.m8n8k32.row.col.s32.s4.s4.s32 {%0, %1}, {%2}, {%3}, {%0, %1};"
+            : "+r"(D.x[0]), "+r"(D.x[1])
+            : "r"(A.x[0]), "r"(B.x[0]));
+        asm("mma.sync.aligned.m8n8k32.row.col.s32.s4.s4.s32 {%0, %1}, {%2}, {%3}, {%0, %1};"
+            : "+r"(D.x[2]), "+r"(D.x[3])
+            : "r"(A.x[1]), "r"(B.x[0]));
+#endif
+#else
+        GGML_UNUSED_VARS(D, A, B);
+        NO_DEVICE_CODE;
+#endif
+    }
+
     static __device__ __forceinline__ void mma(
             tile<16, 4, half2> & D, const tile<16, 8, half2> & A, const tile<8, 8, half2> & B) {
 #ifdef TURING_MMA_AVAILABLE
