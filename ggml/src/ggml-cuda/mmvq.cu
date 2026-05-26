@@ -5,6 +5,24 @@
 
 #include <cstdint>
 
+#include "gemv_q4k_f16.cuh"
+
+static bool q4k_fp16_gemv_enabled() {
+    static bool init = false, enable = false;
+    if (!init) { const char * e = getenv("Q4K_FP16_GEMV"); enable = (e && e[0] != '0'); init = true; }
+    return enable;
+}
+static int q4k_gemv_mode() {
+    static int mode = -1;
+    if (mode < 0) {
+        const char * e = getenv("Q4K_GEMV_MODE");
+        mode = (e && e[0] == 'f' && e[1] == '3') ? 0 :  // f32 pure
+               (e && e[0] == 'f' && e[1] == '1') ? 1 :  // f16 coeff-precompute
+               1; // default: f16
+    }
+    return mode;
+}
+
 typedef float (*vec_dot_q_cuda_t)(const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs);
 
 static constexpr __device__ vec_dot_q_cuda_t get_vec_dot_q_cuda(ggml_type type) {
@@ -1044,6 +1062,16 @@ void ggml_cuda_mul_mat_vec_q(
     GGML_TENSOR_BINARY_OP_LOCALS;
 
     cudaStream_t stream = ctx.stream();
+
+    if (src0->type == GGML_TYPE_Q4_K && ne11 == 1 && !fusion && !ids && q4k_fp16_gemv_enabled()) {
+        const int64_t K = ne00, N = ne01;
+        const int threads = (K >= 8192) ? 256 : 128;
+        if (q4k_gemv_mode() == 0)
+            gemv_q4_K_f32_k<<<N,threads,0,stream>>>((const block_q4_K*)src0->data, (const float*)src1->data, (float*)dst->data, K, N);
+        else
+            gemv_q4_K_f16_k<<<N,threads,0,stream>>>((const block_q4_K*)src0->data, (const float*)src1->data, (float*)dst->data, K, N);
+        return;
+    }
 
     const size_t ts_src0 = ggml_type_size(src0->type);
     const size_t ts_src1 = ggml_type_size(src1->type);
