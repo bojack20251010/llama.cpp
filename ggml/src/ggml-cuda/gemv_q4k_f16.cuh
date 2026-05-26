@@ -7,6 +7,28 @@
 
 static __device__ __forceinline__ float _hsum2(const half2 & h) { return __half2float(h.x) + __half2float(h.y); }
 
+// PTX inline asm wrappers — survive compiler -ffast-math / FMA disabling
+static __device__ __forceinline__ half2 _fma_h2(half2 a, half2 b, half2 c) {
+    half2 r;
+    asm volatile("fma.rn.f16x2 %0, %1, %2, %3;" : "=r"(*(unsigned*)&r) : "r"(*(unsigned*)&a), "r"(*(unsigned*)&b), "r"(*(unsigned*)&c));
+    return r;
+}
+static __device__ __forceinline__ half2 _mul_h2(half2 a, half2 b) {
+    half2 r;
+    asm volatile("mul.rn.f16x2 %0, %1, %2;" : "=r"(*(unsigned*)&r) : "r"(*(unsigned*)&a), "r"(*(unsigned*)&b));
+    return r;
+}
+static __device__ __forceinline__ half2 _add_h2(half2 a, half2 b) {
+    half2 r;
+    asm volatile("add.rn.f16x2 %0, %1, %2;" : "=r"(*(unsigned*)&r) : "r"(*(unsigned*)&a), "r"(*(unsigned*)&b));
+    return r;
+}
+static __device__ __forceinline__ half _neg_h(half a) {
+    half r;
+    asm volatile("neg.f16 %0, %1;" : "=h"(*(unsigned short*)&r) : "h"(*(unsigned short*)&a));
+    return r;
+}
+
 // ── f32 pure: coeff = ws*w - wm (f32), float4 act load, fmaf accumulate ──
 static __global__ void gemv_q4_K_f32_k(
     const block_q4_K * __restrict__ w,
@@ -96,7 +118,7 @@ static __global__ void gemv_q4_K_f16_k(
         for (int sub = 0; sub < 8; sub++) {
             const half ws_h = sub_sc_h[sub], wm_h = sub_m_h[sub];
             const half2 ws_h2  = __halves2half2(ws_h, ws_h);
-            const half2 nwm_h2 = __halves2half2(__hneg(wm_h), __hneg(wm_h));
+            const half2 nwm_h2 = __halves2half2(_neg_h(wm_h), _neg_h(wm_h));
             const bool use_high = (sub & 1);
             const int q_base = (sub / 2) * 32;
 
@@ -112,14 +134,14 @@ static __global__ void gemv_q4_K_f16_k(
                 else          { w0=__int2half_rn(qv & 0xF);      w1=__int2half_rn((qv>> 8)&0xF);
                                 w2=__int2half_rn((qv>>16)&0xF);  w3=__int2half_rn((qv>>24)&0xF); }
 
-                half2 c01 = __hfma2(ws_h2, __halves2half2(w0,w1), nwm_h2);
-                half2 c23 = __hfma2(ws_h2, __halves2half2(w2,w3), nwm_h2);
+                half2 c01 = _fma_h2(ws_h2, __halves2half2(w0,w1), nwm_h2);
+                half2 c23 = _fma_h2(ws_h2, __halves2half2(w2,w3), nwm_h2);
 
                 const float4 xv = *(const float4*)(x + a_off);
                 half2 x01 = __floats2half2_rn(xv.x, xv.y);
                 half2 x23 = __floats2half2_rn(xv.z, xv.w);
 
-                acc += _hsum2(__hadd2(__hmul2(c01, x01), __hmul2(c23, x23)));
+                acc += _hsum2(_add_h2(_mul_h2(c01, x01), _mul_h2(c23, x23)));
             }
         }
     }
